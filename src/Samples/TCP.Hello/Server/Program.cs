@@ -10,6 +10,7 @@ namespace Server
         public static void Main(string[] args)
         {
             server = SocketFactory.CreateTcpServer<Program>();
+            server.Options.LogLevel = LogType.All;
             //server.Options.DefaultListen.Port =9090;
             //server.Options.DefaultListen.Host = "127.0.0.1";
             server.Open();
