@@ -1,4 +1,7 @@
 .vs/BeetleX/DesignTimeBuild/.dtbcache
+bin/
+obj/
+*.user
 Chat.Client/bin/
 Chat.Client/obj/
 Chat.Server/bin/
