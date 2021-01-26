@@ -39,6 +39,9 @@ namespace BeetleX
 
         public bool SyncAccept { get; set; } = true;
 
+        /// <summary>
+        /// 心跳超时时间秒
+        /// </summary>
         public int SessionTimeOut { get; set; }
 
         public bool UseIPv6 { get; set; }

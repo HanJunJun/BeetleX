@@ -31,6 +31,9 @@ namespace BeetleX
             Name = "TCP-SERVER-" + Guid.NewGuid().ToString("N");
         }
 
+        /// <summary>
+        /// 会话池中的对象数量
+        /// </summary>
         private int mCount;
 
         private Dispatchs.DispatchCenter<SocketAsyncEventArgsX> mReceiveDispatchCenter = null;
@@ -151,13 +154,21 @@ namespace BeetleX
             }
         }
 
+        /// <summary>
+        /// 把session添加到会话池中
+        /// </summary>
+        /// <param name="session"></param>
         private void AddSession(ISession session)
         {
             mSessions[session.ID] = session;
+            //会话数量原子操作+1
             System.Threading.Interlocked.Increment(ref mCount);
             System.Threading.Interlocked.Increment(ref mVersion);
         }
 
+        /// <summary>
+        /// 清空所有的会话数据
+        /// </summary>
         private void ClearSession()
         {
             ISession[] sessions = GetOnlines();
@@ -165,11 +176,16 @@ namespace BeetleX
                 item.Dispose();
         }
 
+        /// <summary>
+        /// 从会话池中移除指定session
+        /// </summary>
+        /// <param name="session"></param>
         private void RemoveSession(ISession session)
         {
             ISession value;
             if (mSessions.TryRemove(session.ID, out value))
             {
+                //在线数量原子操作-1
                 System.Threading.Interlocked.Decrement(ref mCount);
                 System.Threading.Interlocked.Increment(ref mVersion);
             }
@@ -183,8 +199,10 @@ namespace BeetleX
         {
             if (!mInitialized)
             {
+                //接收调度中心
                 mReceiveDispatchCenter = new Dispatchs.DispatchCenter<SocketAsyncEventArgsX>(ProcessReceiveArgs, Options.IOQueues);
                 int maxBufferSize;
+                //缓冲池最大内存
                 if (Options.BufferPoolMaxMemory == 0)
                 {
                     Options.BufferPoolMaxMemory = 500;
@@ -192,11 +210,16 @@ namespace BeetleX
                 maxBufferSize = (int)(((long)Options.BufferPoolMaxMemory * 1024 * 1024) / Options.BufferSize / Options.BufferPoolGroups);
                 if (maxBufferSize < Options.BufferPoolSize)
                     maxBufferSize = Options.BufferPoolSize;
+                //接收缓冲池分组
                 mReceiveBufferPoolGroup = new BufferPoolGroup(Options.BufferSize, Options.BufferPoolSize, maxBufferSize, Options.BufferPoolGroups);
+                //发送缓冲池分组
                 mSendBufferPoolGroup = new BufferPoolGroup(Options.BufferSize, Options.BufferPoolSize, maxBufferSize, Options.BufferPoolGroups);
+                //客户端连接集合
                 mSessions = new ConcurrentDictionary<long, ISession>();
                 mInitialized = true;
+                //连接调度器
                 mAcceptDispatcher = new Dispatchs.DispatchCenter<AcceptSocketInfo>(AcceptProcess, Math.Min(Environment.ProcessorCount, 16));
+                //心跳监控定时器
                 if (Options.SessionTimeOut > 0)
                 {
                     if (Options.SessionTimeOut * 1000 < mTimeOutCheckTime)
@@ -206,6 +229,7 @@ namespace BeetleX
 
                     if (mDetectionTimer != null)
                         mDetectionTimer.Dispose();
+                    //定时器类
                     mDetectionTimer = new System.Threading.Timer(OnDetectionHandler, null,
                         mTimeOutCheckTime, mTimeOutCheckTime);
                     if (EnableLog(LogType.Info))
@@ -245,6 +269,10 @@ namespace BeetleX
             }
         }
 
+        /// <summary>
+        /// 客户端已连接成功回调方法
+        /// </summary>
+        /// <param name="e"></param>
         private void OnListenAcceptCallBack(AcceptSocketInfo e)
         {
             Task.Run(() => AcceptProcess(e));
@@ -260,6 +288,7 @@ namespace BeetleX
                 foreach (ListenHandler item in this.Options.Listens)
                 {
                     item.SyncAccept = Options.SyncAccept;
+                    //把客户端连接成功回调处理传入监听处理类
                     item.Run(this, OnListenAcceptCallBack);
                 }
                 if (!GCSettings.IsServerGC)
@@ -372,8 +401,13 @@ namespace BeetleX
             }
         }
 
+        /// <summary>
+        /// 客户端已连接处理
+        /// </summary>
+        /// <param name="e"></param>
         private void ConnectedProcess(AcceptSocketInfo e)
         {
+            //构建客户端连接会话对象
             TcpSession session = new TcpSession();
             session.MaxWaitMessages = Options.MaxWaitMessages;
             session.Socket = e.Socket;
@@ -387,13 +421,15 @@ namespace BeetleX
             session.SendEventArgs.Completed += IO_Completed;
             session.ReceiveEventArgs.Completed += IO_Completed;
             session.LittleEndian = Options.LittleEndian;
+            //客户端远程端口
             session.RemoteEndPoint = e.Socket.RemoteEndPoint;
             if (this.Packet != null)
             {
                 session.Packet = this.Packet.Clone();
+                //注册数据解码事件
                 session.Packet.Completed = OnPacketDecodeCompleted;
             }
-
+            //从接受调度中心取一个对象出来给当前会话对象
             session.ReceiveDispatcher = mReceiveDispatchCenter.Next();
             AddSession(session);
             if (!e.Listen.SSL)
@@ -423,6 +459,7 @@ namespace BeetleX
                 cea.Server = this;
                 cea.Socket = e.Socket;
                 EndPoint endPoint = e.Socket.RemoteEndPoint;
+                //回调用户注册的方法，也就是用户的事件处理类
                 OnConnecting(cea);
                 if (cea.Cancel)
                 {
@@ -435,6 +472,7 @@ namespace BeetleX
                 {
                     if (e.Socket.Connected)
                     {
+                        //已连接处理类，如果是ssl连接需要创建ssl处理
                         ConnectedProcess(e);
                         if (EnableLog(LogType.Debug))
                             Log(LogType.Debug, null, $" {endPoint} connected");
@@ -502,6 +540,10 @@ namespace BeetleX
             }
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="e"></param>
         private void ProcessReceiveArgs(SocketAsyncEventArgs e)
         {
             SocketAsyncEventArgsX ex = (SocketAsyncEventArgsX)e;
@@ -702,6 +744,11 @@ namespace BeetleX
 
         }
 
+        /// <summary>
+        /// 数据包解码完成事件
+        /// </summary>
+        /// <param name="server"></param>
+        /// <param name="e"></param>
         private void OnPacketDecodeCompleted(object server, PacketDecodeCompletedEventArgs e)
         {
             try
@@ -789,10 +836,15 @@ namespace BeetleX
             Error(error, session, string.Format(message, parameters));
         }
 
+        /// <summary>
+        /// 关闭指定session会话，并从会话池中移除
+        /// </summary>
+        /// <param name="session"></param>
         public void CloseSession(ISession session)
         {
             try
             {
+                //移除会话
                 RemoveSession(session);
                 if (Handler != null)
                     Handler.Disconnect(this, new SessionEventArgs { Server = this, Session = session });
@@ -804,10 +856,15 @@ namespace BeetleX
             }
             finally
             {
+                //关闭会话的socket连接
                 CloseSocket(session.Socket);
             }
         }
 
+        /// <summary>
+        /// 关闭socket
+        /// </summary>
+        /// <param name="socket"></param>
         internal static void CloseSocket(Socket socket)
         {
             try
@@ -823,11 +880,16 @@ namespace BeetleX
         }
         #endregion
 
+        /// <summary>
+        /// 释放资源
+        /// </summary>
         public void Dispose()
         {
+            //清除所有session
             ClearSession();
             mInitialized = false;
             Status = ServerStatus.Closed;
+            //遍历清理所有的tcp监听服务
             foreach (var item in Options.Listens)
                 item.Dispose();
             if (mReceiveDispatchCenter != null)
@@ -835,7 +897,12 @@ namespace BeetleX
             Status = ServerStatus.Closed;
 
         }
-
+        /// <summary>
+        /// 给指定的session客户端会话发送数据
+        /// </summary>
+        /// <param name="data"></param>
+        /// <param name="session"></param>
+        /// <returns></returns>
         public bool Send(object data, ISession session)
         {
             if (data == null)
@@ -927,6 +994,10 @@ namespace BeetleX
 
         private int mGetOnlinesStatus = 0;
 
+        /// <summary>
+        /// 获取所有在线的会话
+        /// </summary>
+        /// <returns></returns>
         public ISession[] GetOnlines()
         {
             if (mOnlines.Version != this.Version)
